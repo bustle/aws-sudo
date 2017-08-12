@@ -55,8 +55,8 @@ async function run(argv) {
   console.log(`Run "export AWS_PROFILE=${sessionProfile}" to set the default profile for this terminal`)
 }
 
-function writeCredentialsFile(){
-  fs.writeFileSync(Object.keys(creds).reduce((str, profile) => {
+function writeCredentialsFile(creds){
+  writeFileSync(credentialsFile, Object.keys(creds).reduce((str, profile) => {
     str = str + `[${profile}]\n`
     Object.keys(creds[profile]).map((key) => str = str + `${key} = ${creds[profile][key]}\n`)
     return str
