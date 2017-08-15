@@ -43,7 +43,7 @@ async function run(argv) {
 
   creds[sessionProfile] = Object.create(null)
   creds[sessionProfile]['aws_access_key_id'] = AccessKeyId
-  creds[sessionProfile]['aws_secret_access_key_id'] = SecretAccessKey
+  creds[sessionProfile]['aws_secret_access_key'] = SecretAccessKey
   creds[sessionProfile]['aws_session_token'] = SessionToken
 
   writeCredentialsFile(creds)
