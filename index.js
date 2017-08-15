@@ -27,7 +27,10 @@ const argv = require('yargs')
   .help()
   .argv
 
-run(argv)
+run(argv).catch(err => {
+  console.log(err.message)
+  process.exit(1)
+})
 
 async function run(argv) {
   const { token: TokenCode, profile } = argv
