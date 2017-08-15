@@ -1,6 +1,6 @@
 {
   "name": "aws-sudo",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "A CLI tool for loading temporary MFA associated keys from AWS",
   "main": "index.js",
   "scripts": {
