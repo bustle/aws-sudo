@@ -13,6 +13,7 @@
     "aws-sdk": "^2.96.0",
     "yargs": "^8.0.2"
   },
+  "repository": "gitlab:bustle/aws-sudo",
   "bin": {
     "aws-sudo": "index.js"
   }
