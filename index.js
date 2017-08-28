@@ -32,30 +32,30 @@ run(argv).catch(err => {
   process.exit(1)
 })
 
-async function run(argv) {
-  const { token: TokenCode, profile } = argv
+function run({ token: TokenCode, profile }) {
   const sessionProfile = argv.sessionProfile || `${profile}-session`
 
   if (sessionProfile === profile ) {
     throw new Error('You cannot write to the same profile used to retrieve the session credentials')
   }
 
-  const { User: { UserName } } = await IAM.getUser().promise()
-  const { MFADevices: [ { SerialNumber } ] } = await IAM.listMFADevices({ UserName }).promise()
-  const { Credentials: { AccessKeyId, SecretAccessKey, SessionToken } } = await STS.getSessionToken({ SerialNumber, TokenCode }).promise()
+  return IAM.getUser().promise()
+    .then(({ User: { UserName } }) => IAM.listMFADevices({ UserName }).promise())
+    .then(({ MFADevices: [ { SerialNumber } ] }) => STS.getSessionToken({ SerialNumber, TokenCode }).promise())
+    .then(({ Credentials: { AccessKeyId, SecretAccessKey, SessionToken } }) => {
+      creds[sessionProfile] = Object.create(null)
+      creds[sessionProfile]['aws_access_key_id'] = AccessKeyId
+      creds[sessionProfile]['aws_secret_access_key'] = SecretAccessKey
+      creds[sessionProfile]['aws_session_token'] = SessionToken
 
-  creds[sessionProfile] = Object.create(null)
-  creds[sessionProfile]['aws_access_key_id'] = AccessKeyId
-  creds[sessionProfile]['aws_secret_access_key'] = SecretAccessKey
-  creds[sessionProfile]['aws_session_token'] = SessionToken
+      writeCredentialsFile(creds)
 
-  writeCredentialsFile(creds)
-
-  console.log(`AWS_ACCESS_KEY_ID=${AccessKeyId}`)
-  console.log(`AWS_SECRET_ACCESS_KEY=${SecretAccessKey}`)
-  console.log(`AWS_SESSION_TOKEN=${SessionToken}`)
-  console.log(`Session credentials written to ${sessionProfile}`)
-  console.log(`Run "export AWS_PROFILE=${sessionProfile}" to set the default profile for this terminal`)
+      console.log(`AWS_ACCESS_KEY_ID=${AccessKeyId}`)
+      console.log(`AWS_SECRET_ACCESS_KEY=${SecretAccessKey}`)
+      console.log(`AWS_SESSION_TOKEN=${SessionToken}`)
+      console.log(`Session credentials written to ${sessionProfile}`)
+      console.log(`Run "export AWS_PROFILE=${sessionProfile}" to set the default profile for this terminal`)
+    })
 }
 
 function writeCredentialsFile(creds){
