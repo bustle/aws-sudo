@@ -10,11 +10,14 @@
   "author": "Steve Faulkner <southpolesteve@gmail.com>",
   "license": "ISC",
   "dependencies": {
-    "aws-sdk": "^2.96.0",
+    "aws-sdk": "^2.354.0",
     "yargs": "^8.0.2"
   },
   "repository": "bustle/aws-sudo",
   "bin": {
     "aws-sudo": "index.js"
+  },
+  "devDependencies": {
+    "ttab": "^0.6.1"
   }
 }

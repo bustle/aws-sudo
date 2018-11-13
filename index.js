@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 const AWS = require('aws-sdk')
-const { execSync } = require('child_process')
+const { exec } = require('child_process')
 const { readFileSync, writeFileSync } = require('fs')
 const { join } = require('path')
 
@@ -50,11 +50,11 @@ function run({ token: TokenCode, profile }) {
 
       writeCredentialsFile(creds)
 
-      console.log(`AWS_ACCESS_KEY_ID=${AccessKeyId}`)
-      console.log(`AWS_SECRET_ACCESS_KEY=${SecretAccessKey}`)
-      console.log(`AWS_SESSION_TOKEN=${SessionToken}`)
-      console.log(`Session credentials written to ${sessionProfile}`)
-      console.log(`Run "export AWS_PROFILE=${sessionProfile}" to set the default profile for this terminal`)
+      exec(`npx ttab eval "export AWS_PROFILE=${sessionProfile}; echo Exported session AWS_PROFILE=${sessionProfile}"`, err => {
+        if (err) {
+          console.log(err)
+        }
+      })
     })
 }
 
