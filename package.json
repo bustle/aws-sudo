@@ -1,17 +1,23 @@
 {
   "name": "aws-sudo",
-  "version": "1.2.0",
+  "version": "2.0.0",
   "description": "A CLI tool for loading temporary MFA associated keys from AWS",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
+  "keywords": [
+    "aws",
+    "sudo",
+    "mfa"
+  ],
   "author": "Steve Faulkner <southpolesteve@gmail.com>",
   "license": "ISC",
   "dependencies": {
-    "aws-sdk": "^2.96.0",
-    "yargs": "^8.0.2"
+    "aws-sdk": "^2.429.0",
+    "mkdirp": "^0.5.1",
+    "promptly": "^3.0.3",
+    "yargs": "^13.2.2"
   },
   "repository": "bustle/aws-sudo",
   "bin": {
