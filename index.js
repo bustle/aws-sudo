@@ -1,92 +1,170 @@
 #!/usr/bin/env node
 
 const AWS = require('aws-sdk')
-const { execSync } = require('child_process')
-const { readFileSync, writeFileSync } = require('fs')
-const { join } = require('path')
+const childProcess = require('child_process')
+const fs = require('fs')
+const mkdirp = require('mkdirp')
+const os = require('os')
+const path = require('path')
+const promptly = require('promptly')
+const yargs = require('yargs')
+const util = require('util')
 
-const IAM = new AWS.IAM()
-const STS = new AWS.STS()
+const writeFileAsync = util.promisify(fs.writeFile)
+const readFileAsync = util.promisify(fs.readFile)
+const mkdirpAsync = util.promisify(mkdirp)
 
-const credentialsFile = join(resolveHome(), '.aws/credentials')
-const creds = parseAwsIni(readFileSync(credentialsFile).toString())
+const configPath = process.platform === 'win32'
+  ? path.join(process.env.APPDATA, 'aws-sudo')
+  : path.join(os.homedir(), '.aws-sudo')
 
-const argv = require('yargs')
+const askForToken = () => {
+  return promptly.prompt('# Token: ', {
+    validator(value) {
+      if (value.length !== 6) {
+        throw new Error('Tokens are 6 characters')
+      }
+      return value
+    }
+  })
+}
+
+async function chooseMFADevice(devices) {
+  if (devices.length == 0) {
+    throw new Error('No MFA devices are setup on this account')
+  }
+  if (devices.length === 1) {
+    return devices[0].SerialNumber
+  }
+
+  const choice = await promptly.choose('# Choose a MFA device', devices.map(({ SerialNumber, EnableDate }) => `${SerialNumber} - ${EnableDate}`))
+  return choice.split(' - ')[0]
+}
+
+async function getCredentials({ User, token, duration }) {
+  const IAM = new AWS.IAM()
+  const STS = new AWS.STS()
+
+  const { UserName, Arn: UserArn } = User
+
+  const { MFADevices } = await IAM.listMFADevices({ UserName }).promise()
+  // prompt to pick a device
+  const SerialNumber = await chooseMFADevice(MFADevices)
+  const TokenCode = token || await askForToken()
+
+  const { Credentials: { AccessKeyId, SecretAccessKey, SessionToken } } = await STS.getSessionToken({ SerialNumber, TokenCode, DurationSeconds: duration }).promise()
+  return { UserArn, AccessKeyId, SecretAccessKey, SessionToken }
+}
+
+async function readConfig() {
+  try {
+    const data = await readFileAsync(path.join(configPath, 'config.json'))
+    return JSON.parse(data.toString())
+  } catch {
+    return {}
+  }
+}
+
+function writeConfig(data) {
+  return writeFileAsync(path.join(configPath, 'config.json'), JSON.stringify(data))
+}
+
+async function cacheCreds(creds) {
+  await mkdirpAsync(configPath)
+  const { UserArn } = creds
+  const config = await readConfig()
+  const newConfig = {
+    ...config,
+    [UserArn]: creds
+  }
+  await writeConfig(newConfig)
+}
+
+async function fetchValidCachedCreds(UserArn) {
+  const config = await readConfig()
+  const creds = config[UserArn]
+  if (!creds) {
+    return null
+  }
+  const IAM = new AWS.IAM({
+    accessKeyId: creds.AccessKeyId,
+    secretAccessKey: creds.SecretAccessKey,
+    sessionToken: creds.SessionToken
+  })
+  try {
+    await IAM.getUser().promise()
+    return creds
+  } catch {
+    return null
+  }
+}
+
+function exec(input, creds) {
+  const { AccessKeyId, SecretAccessKey, SessionToken } = creds
+  if (input.length === 0) {
+    console.log(`AWS_ACCESS_KEY_ID=${AccessKeyId}; export AWS_ACCESS_KEY_ID;`)
+    console.log(`AWS_SECRET_ACCESS_KEY=${SecretAccessKey}; export AWS_SECRET_ACCESS_KEY;`)
+    console.log(`AWS_SESSION_TOKEN=${SessionToken}; export AWS_SESSION_TOKEN`)
+    return
+  }
+  const [cmd, ...args] = input
+  const opts = {
+    env: {
+      ...process.env,
+      AWS_ACCESS_KEY_ID: AccessKeyId,
+      AWS_SECRET_ACCESS_KEY: SecretAccessKey,
+      AWS_SESSION_TOKEN: SessionToken,
+    },
+    stdio: 'inherit',
+    shell: true,
+  }
+  const child = childProcess.spawn(cmd, args, opts)
+  child.on('error', err => {
+    console.error(err)
+    process.exit(1)
+  })
+  child.on('exit', (code, signal) => {
+    if (signal) {
+      console.error(`terminated by ${signal}`)
+      process.exit(1)
+    }
+    process.exit(code)
+  })
+}
+
+async function run({ token, duration, _: command }) {
+  const IAM = new AWS.IAM()
+  const { User } = await IAM.getUser().promise()
+
+  const cachedCreds = await fetchValidCachedCreds(User.Arn)
+  if (cachedCreds) {
+    exec(command, cachedCreds)
+    return
+  }
+
+  const creds = await getCredentials({ User, token, duration })
+  await cacheCreds(creds)
+  exec(command, creds)
+}
+
+
+const argv = yargs
   .option('token', {
-      alias: 't',
-      demandOption: true,
-      describe: 'Token from your MFA device',
-      type: 'string'
+    alias: 't',
+    demandOption: false,
+    describe: 'Token from your MFA device',
+    type: 'string'
   })
-  .option('profile', {
-      alias: 'p',
-      default: process.env.AWS_PROFILE || 'default',
-      describe: 'AWS Profile to use for creating session credentials',
-      type: 'string'
+  .option('duration', {
+    alias: 'd',
+    default: 43200,
+    describe: 'Seconds to issue the session token for, defaults to 12 hours',
+    type: 'number'
   })
-  .help()
+  .help('h')
   .argv
 
 run(argv).catch(err => {
   console.log(err.message)
   process.exit(1)
 })
-
-function run({ token: TokenCode, profile }) {
-  const sessionProfile = argv.sessionProfile || `${profile}-session`
-
-  if (sessionProfile === profile ) {
-    throw new Error('You cannot write to the same profile used to retrieve the session credentials')
-  }
-
-  return IAM.getUser().promise()
-    .then(({ User: { UserName } }) => IAM.listMFADevices({ UserName }).promise())
-    .then(({ MFADevices: [ { SerialNumber } ] }) => STS.getSessionToken({ SerialNumber, TokenCode }).promise())
-    .then(({ Credentials: { AccessKeyId, SecretAccessKey, SessionToken } }) => {
-      creds[sessionProfile] = Object.create(null)
-      creds[sessionProfile]['aws_access_key_id'] = AccessKeyId
-      creds[sessionProfile]['aws_secret_access_key'] = SecretAccessKey
-      creds[sessionProfile]['aws_session_token'] = SessionToken
-
-      writeCredentialsFile(creds)
-
-      console.log(`AWS_ACCESS_KEY_ID=${AccessKeyId}`)
-      console.log(`AWS_SECRET_ACCESS_KEY=${SecretAccessKey}`)
-      console.log(`AWS_SESSION_TOKEN=${SessionToken}`)
-      console.log(`Session credentials written to ${sessionProfile}`)
-      console.log(`Run "export AWS_PROFILE=${sessionProfile}" to set the default profile for this terminal`)
-    })
-}
-
-function writeCredentialsFile(creds){
-  writeFileSync(credentialsFile, Object.keys(creds).reduce((str, profile) => {
-    str = str + `[${profile}]\n`
-    Object.keys(creds[profile]).map((key) => str = str + `${key} = ${creds[profile][key]}\n`)
-    return str
-  }, ""))
-}
-
-
-function parseAwsIni(ini) {
-  var section,
-      out = Object.create(null),
-      re = /^\[([^\]]+)\]\s*$|^([a-z_]+)\s*=\s*(.+?)\s*$/,
-      lines = ini.split(/\r?\n/)
-
-  lines.forEach(function(line) {
-    var match = line.match(re)
-    if (!match) return
-    if (match[1]) {
-      section = match[1]
-      if (out[section] == null) out[section] = Object.create(null)
-    } else if (section) {
-      out[section][match[2]] = match[3]
-    }
-  })
-
-  return out
-}
-
-function resolveHome() {
-  return process.env.HOME || process.env.USERPROFILE || ((process.env.HOMEDRIVE || 'C:') + process.env.HOMEPATH)
-}
